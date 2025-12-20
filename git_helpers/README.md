@@ -24,8 +24,7 @@ A menu-driven Git helper script that provides a simple graphical (terminal UI) i
 	- Undo last commit but keep changes (soft reset)
 	- Amend last commit message
 - Remotes: push and set upstream for current branch
-- Utilities: restore a file from HEAD, unstage all changes
-- Utilities: restore a file from HEAD, unstage all changes
+- Utilities: restore a file from HEAD, unstage all changes, add alias to bash_profile
 - Config & UX: prompts to set user.name, user.email, core.editor, init.defaultBranch, and pull.rebase if missing; clears terminal on exit; shows command output in a scrollable viewer
 
 ### Commit message prefix
@@ -36,6 +35,16 @@ A menu-driven Git helper script that provides a simple graphical (terminal UI) i
 Examples:
 - `export GIT_HELPER_PREFIX="[{{branch}}] (#{{ticket}})"`
 - `export GIT_HELPER_PREFIX="{{ticket}}: "`
+
+## Adding an Alias
+
+Use the **Utilities → Add alias to bash_profile** menu option to:
+- Create a permanent shell alias pointing to the git-helper script
+- Choose your own alias name (defaults to `git_helper`)
+- Optionally configure `GIT_HELPER_PREFIX` environment variable with placeholder support
+- Activate the alias immediately in the current terminal session
+
+The alias and prefix will be saved to `~/.bash_profile` and available after restarting your terminal or running `source ~/.bash_profile`.
 
 ## Usage
 
