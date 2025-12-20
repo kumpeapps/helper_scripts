@@ -980,8 +980,10 @@ cmd_cleanup_prune_fetch() {
 cmd_cleanup_delete_orphan_branches() {
   local def
   def=$(default_branch_name)
-  run_and_show "Switch to $def" git checkout "$def"
-  run_and_show "Fetch + Prune" bash -lc 'git fetch --all && git fetch -p'
+  # Switch to default branch quietly to avoid exit prompts
+  git checkout "$def" >/dev/null 2>&1 || true
+  # Fetch and prune remotes quietly
+  git fetch --all --prune >/dev/null 2>&1 || true
   # Compute remote short names
   local remotes
   remotes=$(remote_short_names)
@@ -1017,7 +1019,7 @@ cmd_cleanup_delete_orphan_branches() {
     done
     ui_show_text_file "Deleted branches" "$out"
     rm -f "$out"
-    prompt_exit_after_display
+    # Do not prompt for exit here; return to menu
   fi
 }
 
