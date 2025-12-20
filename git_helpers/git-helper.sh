@@ -1198,16 +1198,76 @@ cmd_utils_unstage_all() {
   fi
 }
 
+cmd_utils_add_alias() {
+  local script_path
+  if command -v realpath >/dev/null 2>&1; then
+    script_path=$(realpath "${BASH_SOURCE[0]}")
+  else
+    script_path=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)/$(basename -- "${BASH_SOURCE[0]}")
+  fi
+
+  local profile_file
+  profile_file="$HOME/.bash_profile"
+  touch "$profile_file"
+
+  local alias_name
+  alias_name=$(ui_input "$TITLE" "Alias name to add to ~/.bash_profile" "git_helper") || return
+  [[ -z "$alias_name" ]] && alias_name="git_helper"
+
+  if grep -Eq "^alias[[:space:]]+$alias_name=" "$profile_file" 2>/dev/null; then
+    if ui_yesno "$TITLE" "Alias '$alias_name' already exists in $profile_file. Replace it?"; then
+      local tmp_alias
+      tmp_alias=$(mktemp "${TMPDIR:-/tmp}/git-helper.alias.XXXXXX")
+      grep -Ev "^alias[[:space:]]+$alias_name=" "$profile_file" >"$tmp_alias" || true
+      mv "$tmp_alias" "$profile_file"
+    else
+      return
+    fi
+  fi
+
+  local alias_line
+  alias_line="alias $alias_name=\"bash $script_path\""
+  echo "$alias_line" >>"$profile_file"
+  eval "$alias_line" || true
+
+  local msg
+  msg="Added alias '$alias_name' pointing to:\nbash $script_path\nSaved to $profile_file.\nAlias activated in current session."
+
+  if ui_yesno "$TITLE" "Add or update GIT_HELPER_PREFIX in $profile_file? (placeholders: {{branch}}, {{ticket}})"; then
+    local prefix
+    prefix=$(ui_input "$TITLE" "Enter GIT_HELPER_PREFIX (use {{branch}} and/or {{ticket}})" "${GIT_HELPER_PREFIX:-}") || prefix=""
+    if [[ -n "$prefix" ]]; then
+      local tmp_prefix
+      tmp_prefix=$(mktemp "${TMPDIR:-/tmp}/git-helper.prefix.XXXXXX")
+      grep -Ev '^(export[[:space:]]+)?GIT_HELPER_PREFIX=' "$profile_file" >"$tmp_prefix" || true
+      mv "$tmp_prefix" "$profile_file"
+      echo "export GIT_HELPER_PREFIX=\"$prefix\"" >>"$profile_file"
+      export GIT_HELPER_PREFIX="$prefix"
+      msg+=$'\nGIT_HELPER_PREFIX set for this session and saved to profile.'
+    else
+      msg+=$'\nGIT_HELPER_PREFIX not changed (empty input).'
+    fi
+  fi
+
+  # Source the profile to apply changes immediately
+  source "$profile_file" 2>/dev/null || true
+
+  msg+=$'\nProfile sourced. Alias is ready to use!'
+  ui_message "$TITLE" "$msg"
+}
+
 menu_utils() {
   local choice
   choice=$(ui_menu "$TITLE - Utilities" "Select an action" \
     restore_file "Restore file from HEAD" \
     unstage_all "Unstage all changes" \
+    add_alias "Add alias to bash_profile" \
     back "Back" \
   ) || return 0
   case "$choice" in
     restore_file) cmd_utils_restore_file ;;
     unstage_all) cmd_utils_unstage_all ;;
+    add_alias) cmd_utils_add_alias ;;
     back) : ;;
   esac
 }
