@@ -379,6 +379,21 @@ pick_files_to_add() {
   echo "$selected"
 }
 
+# Push current branch to a remote; set upstream if missing
+push_current_branch() {
+  local remote="$1"; shift || true
+  local extra_args=("$@")
+  local branch; branch=$(current_branch)
+
+  # Determine if current branch has an upstream set
+  if git rev-parse --symbolic-full-name --verify --quiet @{u} >/dev/null 2>&1; then
+    git push "$remote" "$branch" "${extra_args[@]}"
+  else
+    # No upstream: set it while pushing
+    git push -u "$remote" "$branch" "${extra_args[@]}" || git push "$remote" "$branch" "${extra_args[@]}"
+  fi
+}
+
 # Expand default commit message prefix from env var GIT_HELPER_PREFIX
 # Supported placeholders:
 #  - {{branch}} -> current branch name
@@ -477,7 +492,7 @@ cmd_add_commit_push() {
     remote=$(pick_remote)
     [[ -z "$remote" ]] && remote="origin"
     branch=$(current_branch)
-    if git push "$remote" "$branch"; then
+    if push_current_branch "$remote"; then
       ui_message "$TITLE" "Committed and pushed to $remote/$branch."
     else
       ui_message "$TITLE" "Commit created, but push failed."
@@ -513,8 +528,11 @@ cmd_push() {
   [[ -z "$remote" ]] && remote="origin"
   branch=$(current_branch)
   if ui_yesno "$TITLE" "Push to $remote/$branch?"; then
-    git push "$remote" "$branch"
-    print_info "Pushed" "$remote/$branch"
+    if push_current_branch "$remote"; then
+      print_info "Pushed" "$remote/$branch"
+    else
+      print_info "Push failed" "$remote/$branch"
+    fi
   fi
 }
 
@@ -806,7 +824,8 @@ EDITOR_EOF
         remote=$(pick_remote)
         [[ -z "$remote" ]] && remote="origin"
         branch=$(current_branch)
-        if git push --force "$remote" "$branch"; then
+        # If no upstream, set it while force pushing
+        if push_current_branch "$remote" --force; then
           post_msg+=$'\nPushed with force to '"$remote/$branch"
         else
           post_msg+=$'\nForce push failed.'
@@ -887,7 +906,7 @@ cmd_history_rebase_onto() {
       remote=$(pick_remote)
       [[ -z "$remote" ]] && remote="origin"
       branch=$(current_branch)
-      if git push --force "$remote" "$branch"; then
+      if push_current_branch "$remote" --force; then
         post_msg+=$'\nPushed with force to '"$remote/$branch"
       else
         post_msg+=$'\nForce push failed.'
