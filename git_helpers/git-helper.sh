@@ -750,8 +750,8 @@ EDITOR_EOF
       if ui_yesno "$TITLE" "Rebase current branch onto '$def' before pushing?"; then
         local rb_out
         rb_out=$(mktemp "${TMPDIR:-/tmp}/git-helper.rebase.XXXXXX")
-        if git fetch --all --prune &>>"$rb_out" && git rebase "$def" &>>"$rb_out"; then
-          post_msg+=$'\nRebased onto '"$def"
+        if git fetch --all --prune &>>"$rb_out" && git rebase "origin/$def" &>>"$rb_out"; then
+          post_msg+=$'\nRebased onto origin/'"$def"
         else
           local status_output
           status_output=$(git status --short)
@@ -775,8 +775,13 @@ EDITOR_EOF
           if [[ -n "$target" ]]; then
             local rb_out2
             rb_out2=$(mktemp "${TMPDIR:-/tmp}/git-helper.rebase.XXXXXX")
-            if git fetch --all --prune &>>"$rb_out2" && git rebase "$target" &>>"$rb_out2"; then
-              post_msg+=$'\nRebased onto '"$target"
+            # Use origin/ prefix if not already a remote ref
+            local rebase_ref="$target"
+            if [[ "$target" != origin/* ]] && [[ "$target" != refs/* ]]; then
+              rebase_ref="origin/$target"
+            fi
+            if git fetch --all --prune &>>"$rb_out2" && git rebase "$rebase_ref" &>>"$rb_out2"; then
+              post_msg+=$'\nRebased onto '"$rebase_ref"
             else
               local status_output2
               status_output2=$(git status --short)
@@ -858,11 +863,25 @@ cmd_history_rebase_onto() {
   # Perform rebase
   local rb_out
   rb_out=$(mktemp "${TMPDIR:-/tmp}/git-helper.rebase.XXXXXX")
-  if git fetch --all --prune &>>"$rb_out" && git rebase "$target" &>>"$rb_out"; then
+  local current; current=$(current_branch)
+  
+  # Fetch all branches
+  if ! git fetch --all --prune &>>"$rb_out"; then
+    ui_message "$TITLE" "Failed to fetch from remote."
+    rm -f "$rb_out"
+    return
+  fi
+  
+  # Pull current branch to ensure we're up to date
+  if ! git pull origin "$current" &>>"$rb_out"; then
+    echo "Warning: Could not pull current branch, continuing with local state" >>"$rb_out"
+  fi
+  
+  if git rebase "origin/$target" &>>"$rb_out"; then
     rm -f "$rb_out"
     # Ask to force push
     local post_msg
-    post_msg="Rebased onto $target."
+    post_msg="Rebased onto origin/$target."
     if ui_yesno "$TITLE" "Push with force (git push --force)?"; then
       local remote branch
       remote=$(pick_remote)
