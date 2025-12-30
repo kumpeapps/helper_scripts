@@ -82,12 +82,17 @@ ui_checklist() {
       echo "$title" >&2
       echo "$prompt" >&2
       local i=0
+      local all_keys=()
       while [[ $i -lt ${#args[@]} ]]; do
         local key="${args[$i]}"; local label="${args[$((i+1))]}"
         printf "[%s] %s\n" "$key" "$label" >&2
+        all_keys+=("$key")
         i=$((i+2))
       done
       read -r -p "Enter keys (space-separated), or 'all': " selection || return 1
+      if [[ "$selection" == "all" ]]; then
+        selection="${all_keys[*]}"
+      fi
       ;;
   esac
   echo "$selection"
@@ -586,6 +591,30 @@ cmd_branch_delete() {
   if ui_yesno "$TITLE" "Delete local branch '$b'?"; then
     git branch -d "$b" || git branch -D "$b"
     print_info "Deleted branch" "$b"
+  fi
+}
+
+cmd_branch_rename() {
+  local b
+  b=$(pick_branch)
+  [[ -z "$b" ]] && return
+  local new_name
+  new_name=$(ui_input "$TITLE" "Rename branch '$b' to" "") || return
+  [[ -z "$new_name" ]] && return
+  if [[ "$b" == "$(current_branch)" ]]; then
+    git branch -m "$new_name"
+  else
+    git branch -m "$b" "$new_name"
+  fi
+  print_info "Renamed branch" "$b → $new_name"
+  
+  # Check if branch existed on remote
+  if git ls-remote --heads origin "$b" >/dev/null; then
+    if ui_yesno "$TITLE" "Push rename to remote (delete old '$b' and push new '$new_name')?"; then
+      git push origin -u "$new_name" 2>&1
+      git push origin --delete "$b" 2>&1 || true
+      print_info "Remote updated" "Old branch '$b' deleted, new branch '$new_name' pushed"
+    fi
   fi
 }
 
@@ -1131,6 +1160,7 @@ menu_branches() {
   choice=$(ui_menu "$TITLE - Branches" "Select an action" \
     branch_create "Create branch" \
     branch_switch "Switch branch" \
+    branch_rename "Rename branch" \
     branch_delete "Delete branch" \
     merge "Merge branch" \
     back "Back" \
@@ -1138,6 +1168,7 @@ menu_branches() {
   case "$choice" in
     branch_create) cmd_branch_create ;;
     branch_switch) cmd_branch_switch ;;
+    branch_rename) cmd_branch_rename ;;
     branch_delete) cmd_branch_delete ;;
     merge) cmd_merge ;;
     back) : ;;
