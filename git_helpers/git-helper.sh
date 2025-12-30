@@ -10,15 +10,140 @@ TITLE="Git Helper"
 HEIGHT=20
 WIDTH=78
 MENU_HEIGHT=12
+CONFIG_DIR="${XDG_CONFIG_HOME:-.config}/git-helper"
+NEVER_INSTALL_FILE="$CONFIG_DIR/never-install-ui"
+
+# Detect available package manager for current distribution
+detect_package_manager() {
+  if command -v apt-get >/dev/null 2>&1; then
+    echo "apt-get"
+  elif command -v dnf >/dev/null 2>&1; then
+    echo "dnf"
+  elif command -v yum >/dev/null 2>&1; then
+    echo "yum"
+  elif command -v pacman >/dev/null 2>&1; then
+    echo "pacman"
+  elif command -v zypper >/dev/null 2>&1; then
+    echo "zypper"
+  elif command -v apk >/dev/null 2>&1; then
+    echo "apk"
+  else
+    echo ""
+  fi
+}
+
+# Install a UI package using the detected package manager
+install_ui_package() {
+  local pkg="$1"
+  local pm
+  pm=$(detect_package_manager)
+  
+  if [[ -z "$pm" ]]; then
+    echo "Error: Could not detect package manager. Please install '$pkg' manually." >&2
+    return 1
+  fi
+  
+  echo "Installing $pkg using $pm..." >&2
+  
+  case "$pm" in
+    apt-get)
+      sudo apt-get update && sudo apt-get install -y "$pkg" >/dev/null 2>&1
+      ;;
+    dnf)
+      sudo dnf install -y "$pkg" >/dev/null 2>&1
+      ;;
+    yum)
+      sudo yum install -y "$pkg" >/dev/null 2>&1
+      ;;
+    pacman)
+      sudo pacman -S --noconfirm "$pkg" >/dev/null 2>&1
+      ;;
+    zypper)
+      sudo zypper install -y "$pkg" >/dev/null 2>&1
+      ;;
+    apk)
+      sudo apk add "$pkg" >/dev/null 2>&1
+      ;;
+    *)
+      echo "Error: Unsupported package manager '$pm'." >&2
+      return 1
+      ;;
+  esac
+}
+
+# Prompt user to choose between whiptail and dialog
+prompt_ui_choice() {
+  echo "Neither whiptail nor dialog is installed." >&2
+  echo "A graphical menu will provide a better user experience." >&2
+  echo "" >&2
+  read -r -p "Would you like to install one? (yes/no/never): " choice || return 1
+  
+  case "$choice" in
+    y|Y|yes|YES)
+      return 0
+      ;;
+    n|N|no|NO)
+      return 1
+      ;;
+    never|NEVER)
+      mkdir -p "$CONFIG_DIR"
+      touch "$NEVER_INSTALL_FILE"
+      return 1
+      ;;
+    *)
+      echo "Invalid choice. Skipping installation." >&2
+      return 1
+      ;;
+  esac
+}
+
+# Prompt user to select which UI tool to install
+select_ui_tool() {
+  echo "Which UI tool would you like to install?" >&2
+  echo "[1] whiptail (lightweight, simple)" >&2
+  echo "[2] dialog (more features)" >&2
+  read -r -p "Enter choice (1 or 2): " choice || return 1
+  
+  case "$choice" in
+    1) echo "whiptail" ;;
+    2) echo "dialog" ;;
+    *)
+      echo "Invalid choice. Skipping installation." >&2
+      return 1
+      ;;
+  esac
+}
 
 # Detect UI tool
 detect_ui() {
   if command -v whiptail >/dev/null 2>&1; then
     UI_TOOL="whiptail"
+    return
   elif command -v dialog >/dev/null 2>&1; then
     UI_TOOL="dialog"
-  else
-    UI_TOOL="text"
+    return
+  fi
+  
+  # Neither whiptail nor dialog found
+  UI_TOOL="text"
+  
+  # Check if user has previously chosen "never"
+  if [[ -f "$NEVER_INSTALL_FILE" ]]; then
+    return
+  fi
+  
+  # Prompt user to install one of the UI tools
+  if prompt_ui_choice; then
+    local selected_tool
+    selected_tool=$(select_ui_tool) || return
+    
+    if install_ui_package "$selected_tool"; then
+      # Successfully installed, update UI_TOOL
+      UI_TOOL="$selected_tool"
+      echo "Successfully installed $selected_tool!" >&2
+    else
+      echo "Installation failed or was cancelled. Continuing with text mode." >&2
+    fi
   fi
 }
 
