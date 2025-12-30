@@ -4,13 +4,18 @@ set -euo pipefail
 # Git Helper with menu-driven UI using whiptail/dialog fallback
 # If neither is available, fall back to a text-based menu.
 
+# Version information
+SCRIPT_VERSION="1.0.0"
+GITHUB_REPO="kumpeapps/helper_scripts"
+
 # Global state
 UI_TOOL=""
-TITLE="Git Helper"
+TITLE="Git Helper v${SCRIPT_VERSION}"
 HEIGHT=20
 WIDTH=78
 MENU_HEIGHT=12
-CONFIG_DIR="${XDG_CONFIG_HOME:-.config}/git-helper"
+default_config_dir="${XDG_CONFIG_HOME:-$HOME/.config}"
+CONFIG_DIR="$default_config_dir/git-helper"
 NEVER_INSTALL_FILE="$CONFIG_DIR/never-install-ui"
 
 # Detect available package manager for current distribution
@@ -372,6 +377,80 @@ ensure_git_available() {
   fi
 }
 
+# Compare two semantic versions
+# Returns: 0 if equal, 1 if version1 < version2, 2 if version1 > version2
+compare_versions() {
+  local v1="$1" v2="$2"
+  if [[ "$v1" == "$v2" ]]; then
+    return 0
+  fi
+  local IFS=.
+  local i arr1=($v1) arr2=($v2)
+  for ((i=0; i<${#arr1[@]} || i<${#arr2[@]}; i++)); do
+    local num1=${arr1[i]:-0} num2=${arr2[i]:-0}
+    if ((num1 > num2)); then
+      return 2
+    elif ((num1 < num2)); then
+      return 1
+    fi
+  done
+  return 0
+}
+
+# Fetch the latest version from GitHub
+fetch_latest_version() {
+  if ! command -v curl >/dev/null 2>&1; then
+    echo "curl not available for update check" >&2
+    return 1
+  fi
+  
+  local raw_url="https://raw.githubusercontent.com/$GITHUB_REPO/main/git_helpers/git-helper.sh"
+  local response
+  response=$(curl -s --connect-timeout 5 --max-time 10 "$raw_url" 2>/dev/null) || return 1
+  
+  # Extract SCRIPT_VERSION from the file
+  echo "$response" | grep '^SCRIPT_VERSION=' | cut -d'"' -f2
+}
+
+# Check for updates from GitHub
+cmd_check_updates() {
+  echo "Checking for updates..." >&2
+  
+  local latest_version
+  latest_version=$(fetch_latest_version) || {
+    ui_message "$TITLE" "Failed to check for updates. Please check your internet connection."
+    return 1
+  }
+  
+  if [[ -z "$latest_version" ]]; then
+    ui_message "$TITLE" "Could not retrieve version information from GitHub."
+    return 1
+  fi
+  
+  compare_versions "$SCRIPT_VERSION" "$latest_version"
+  local cmp=$?
+  
+  if [[ $cmp -eq 0 ]]; then
+    ui_message "$TITLE" "You are running the latest version ($SCRIPT_VERSION)!"
+  elif [[ $cmp -eq 1 ]]; then
+    # Current version is older, update available
+    local msg="A new version is available!
+
+Current version: $SCRIPT_VERSION
+Latest version: $latest_version
+
+To update, pull the latest changes from GitHub:
+  cd /path/to/helper_scripts
+  git pull origin main
+  
+Then re-run the script."
+    ui_message "$TITLE" "$msg"
+  else
+    # Current version is newer (dev/unreleased)
+    ui_message "$TITLE" "You are running a development version ($SCRIPT_VERSION) newer than the latest release ($latest_version)."
+  fi
+}
+
 ensure_repo() {
   if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
     return 0
@@ -696,6 +775,50 @@ cmd_branch_create() {
   [[ -z "$name" ]] && return
   git checkout -b "$name"
   print_info "Created and switched to" "$name"
+}
+
+cmd_branch_create_from() {
+  local name source from_type
+  
+  # Get the new branch name
+  name=$(ui_input "$TITLE" "New branch name" "") || return
+  [[ -z "$name" ]] && return
+  
+  # Choose what to branch from
+  from_type=$(ui_menu "$TITLE - Create From" "Branch from..." \
+    commit "Commit (by hash)" \
+    branch "Branch" \
+    tag "Tag" \
+    cancel "Cancel" \
+  ) || return
+  
+  case "$from_type" in
+    commit)
+      source=$(ui_input "$TITLE" "Commit hash" "") || return
+      [[ -z "$source" ]] && return
+      git checkout -b "$name" "$source"
+      print_info "Created branch '$name' from commit" "$source"
+      ;;
+    branch)
+      source=$(pick_branch)
+      [[ -z "$source" ]] && return
+      git checkout -b "$name" "$source"
+      print_info "Created branch '$name' from branch" "$source"
+      ;;
+    tag)
+      source=$(ui_input "$TITLE" "Tag name" "") || return
+      [[ -z "$source" ]] && return
+      if git rev-parse "$source" >/dev/null 2>&1; then
+        git checkout -b "$name" "$source"
+        print_info "Created branch '$name' from tag" "$source"
+      else
+        ui_message "$TITLE" "Tag '$source' not found."
+      fi
+      ;;
+    cancel)
+      return 0
+      ;;
+  esac
 }
 
 cmd_branch_switch() {
@@ -1284,6 +1407,7 @@ menu_branches() {
   local choice
   choice=$(ui_menu "$TITLE - Branches" "Select an action" \
     branch_create "Create branch" \
+    branch_create_from "Create branch from..." \
     branch_switch "Switch branch" \
     branch_rename "Rename branch" \
     branch_delete "Delete branch" \
@@ -1292,6 +1416,7 @@ menu_branches() {
   ) || return 0
   case "$choice" in
     branch_create) cmd_branch_create ;;
+    branch_create_from) cmd_branch_create_from ;;
     branch_switch) cmd_branch_switch ;;
     branch_rename) cmd_branch_rename ;;
     branch_delete) cmd_branch_delete ;;
@@ -1458,12 +1583,14 @@ menu_utils() {
     restore_file "Restore file from HEAD" \
     unstage_all "Unstage all changes" \
     add_alias "Add alias to bash_profile" \
+    check_updates "Check for updates" \
     back "Back" \
   ) || return 0
   case "$choice" in
     restore_file) cmd_utils_restore_file ;;
     unstage_all) cmd_utils_unstage_all ;;
     add_alias) cmd_utils_add_alias ;;
+    check_updates) cmd_check_updates ;;
     back) : ;;
   esac
 }
