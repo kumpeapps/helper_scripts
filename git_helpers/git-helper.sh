@@ -5,8 +5,22 @@ set -euo pipefail
 # If neither is available, fall back to a text-based menu.
 
 # Version information
-SCRIPT_VERSION="1.0.0"
+SCRIPT_VERSION="0.0.1"
 GITHUB_REPO="kumpeapps/helper_scripts"
+
+# Resolve the on-disk path to this script (without relying on realpath availability)
+script_self_path() {
+  local src
+  src="${BASH_SOURCE[0]}"
+  if command -v realpath >/dev/null 2>&1; then
+    realpath "$src"
+  else
+    local dir base
+    dir="$(cd -- "$(dirname -- "$src")" && pwd -P)"
+    base="$(basename -- "$src")"
+    echo "$dir/$base"
+  fi
+}
 
 # Global state
 UI_TOOL=""
@@ -131,6 +145,11 @@ detect_ui() {
   
   # Neither whiptail nor dialog found
   UI_TOOL="text"
+  
+  # Only prompt for installation if we have a TTY
+  if [[ ! -t 0 ]]; then
+    return
+  fi
   
   # Check if user has previously chosen "never"
   if [[ -f "$NEVER_INSTALL_FILE" ]]; then
@@ -294,6 +313,20 @@ ui_message() {
   prompt_exit_after_display
 }
 
+# Display a message without prompting to exit (useful for non-critical messages)
+ui_message_no_exit() {
+  local title="$1"; shift
+  local text="$1"; shift || true
+  local tmp
+  tmp=$(mktemp "${TMPDIR:-/tmp}/git-helper.msg.XXXXXX")
+  printf "%s\n" "$text" >"$tmp"
+  ui_show_text_file "$title" "$tmp"
+  # Small delay to ensure dialog has finished reading the file
+  sleep 0.1
+  rm -f "$tmp"
+  return 0
+}
+
 # Determine default branch name: origin/HEAD -> short name; fallback to existing local branches
 default_branch_name() {
   local def
@@ -335,23 +368,36 @@ print_info() {
 ui_show_text_file() {
   local title="$1"; shift
   local file="$1"; shift
+  # Fallback helper so we always show the message even if dialog/whiptail fails
+  fallback_to_text() {
+    UI_TOOL="text"
+    echo "==== $title ===="
+    cat "$file"
+    echo
+    if [[ -t 0 ]]; then
+      read -r -p "Press Enter to return to menu..." _
+    fi
+    return 0
+  }
   case "$UI_TOOL" in
     whiptail)
-      whiptail --title "$title" --textbox "$file" "$HEIGHT" "$WIDTH"
+      whiptail --title "$title" --textbox "$file" "$HEIGHT" "$WIDTH" 3>&1 1>&2 2>&3 3>&- || fallback_to_text
       ;;
     dialog)
-      dialog --title "$title" --textbox "$file" "$HEIGHT" "$WIDTH"
+      dialog --title "$title" --textbox "$file" "$HEIGHT" "$WIDTH" 3>&1 1>&2 2>&3 3>&- || fallback_to_text
       ;;
     text)
-      echo "==== $title ===="
-      cat "$file"
-      echo
-      read -r -p "Press Enter to return to menu..." _
+      fallback_to_text
       ;;
   esac
+  return 0
 }
 
 prompt_exit_after_display() {
+  # Only prompt if we have a TTY
+  if [[ ! -t 0 ]]; then
+    return
+  fi
   if ui_yesno "$TITLE" "Exit helper now?"; then
     exit 0
   fi
@@ -381,9 +427,22 @@ ensure_git_available() {
 # Returns: 0 if equal, 1 if version1 < version2, 2 if version1 > version2
 compare_versions() {
   local v1="$1" v2="$2"
+  
+  # Trim whitespace
+  v1="${v1#"${v1%%[![:space:]]*}"}"
+  v1="${v1%"${v1##*[![:space:]]}"}"
+  v2="${v2#"${v2%%[![:space:]]*}"}"
+  v2="${v2%"${v2##*[![:space:]]}"}"
+  
   if [[ "$v1" == "$v2" ]]; then
     return 0
   fi
+  
+  # Validate versions are in correct format
+  if ! [[ "$v1" =~ ^[0-9]+(\.[0-9]+)*$ ]] || ! [[ "$v2" =~ ^[0-9]+(\.[0-9]+)*$ ]]; then
+    return 1
+  fi
+  
   local IFS=.
   local i arr1=($v1) arr2=($v2)
   for ((i=0; i<${#arr1[@]} || i<${#arr2[@]}; i++)); do
@@ -394,6 +453,40 @@ compare_versions() {
       return 1
     fi
   done
+  return 0
+}
+
+# Download latest script from main branch and replace current file
+update_script_from_remote() {
+  if ! command -v wget >/dev/null 2>&1; then
+    echo "wget is required to update automatically." >&2
+    return 1
+  fi
+
+  local dest
+  dest=$(script_self_path)
+  local tmp
+  tmp=$(mktemp "${TMPDIR:-/tmp}/git-helper.update.XXXXXX")
+
+  local raw_url="https://raw.githubusercontent.com/$GITHUB_REPO/main/git_helpers/git-helper.sh"
+
+  # Use wget quietly; allow manual cleanup on failure
+  if ! wget -q -O "$tmp" "$raw_url"; then
+    rm -f "$tmp"
+    return 1
+  fi
+
+  # Basic sanity check to avoid clobbering with an empty file
+  if [[ ! -s "$tmp" ]]; then
+    rm -f "$tmp"
+    echo "Downloaded file is empty; aborting update." >&2
+    return 1
+  fi
+
+  # Preserve executable bit
+  chmod +x "$tmp" || true
+
+  mv "$tmp" "$dest"
   return 0
 }
 
@@ -408,8 +501,15 @@ fetch_latest_version() {
   local response
   response=$(curl -s --connect-timeout 5 --max-time 10 "$raw_url" 2>/dev/null) || return 1
   
-  # Extract SCRIPT_VERSION from the file
-  echo "$response" | grep '^SCRIPT_VERSION=' | cut -d'"' -f2
+  # Extract SCRIPT_VERSION from the file and trim whitespace
+  local version
+  version=$(echo "$response" | grep '^SCRIPT_VERSION=' | cut -d'"' -f2 || true)
+  
+  if [[ -z "$version" ]]; then
+    return 1
+  fi
+  
+  echo "$version" | xargs
 }
 
 # Check for updates from GitHub
@@ -418,37 +518,44 @@ cmd_check_updates() {
   
   local latest_version
   latest_version=$(fetch_latest_version) || {
-    ui_message "$TITLE" "Failed to check for updates. Please check your internet connection."
+    ui_message_no_exit "$TITLE" "Failed to check for updates. Please check your internet connection."
     return 1
   }
   
   if [[ -z "$latest_version" ]]; then
-    ui_message "$TITLE" "Could not retrieve version information from GitHub."
+    ui_message_no_exit "$TITLE" "Could not retrieve version information from GitHub."
     return 1
   fi
   
+  local cmp
+  set +e
   compare_versions "$SCRIPT_VERSION" "$latest_version"
-  local cmp=$?
+  cmp=$?
+  set -e
   
   if [[ $cmp -eq 0 ]]; then
-    ui_message "$TITLE" "You are running the latest version ($SCRIPT_VERSION)!"
+    ui_message_no_exit "$TITLE" "You are running the latest version ($SCRIPT_VERSION)!"
   elif [[ $cmp -eq 1 ]]; then
     # Current version is older, update available
     local msg="A new version is available!
 
 Current version: $SCRIPT_VERSION
 Latest version: $latest_version
-
-To update, pull the latest changes from GitHub:
-  cd /path/to/helper_scripts
-  git pull origin main
-  
-Then re-run the script."
-    ui_message "$TITLE" "$msg"
+It's recommended to update to the latest version."
+    ui_message_no_exit "$TITLE" "$msg"
+    if ui_yesno "$TITLE" "Download and replace this script with the latest version now?"; then
+      if update_script_from_remote; then
+        ui_message "$TITLE" "Update complete. Please rerun the script."
+        exit 0
+      else
+        ui_message_no_exit "$TITLE" "Update failed. Please try manual update."
+      fi
+    fi
   else
     # Current version is newer (dev/unreleased)
-    ui_message "$TITLE" "You are running a development version ($SCRIPT_VERSION) newer than the latest release ($latest_version)."
+    ui_message_no_exit "$TITLE" "You are running a development version ($SCRIPT_VERSION) newer than the latest release ($latest_version)."
   fi
+  return 0
 }
 
 ensure_repo() {
@@ -1651,4 +1758,7 @@ main() {
   main_menu
 }
 
-main "$@"
+# Only run main if this script is being executed directly, not sourced
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+  main "$@"
+fi
