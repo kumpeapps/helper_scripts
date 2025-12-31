@@ -5,7 +5,7 @@ set -euo pipefail
 # If neither is available, fall back to a text-based menu.
 
 # Version information
-SCRIPT_VERSION="0.0.1"
+SCRIPT_VERSION="1.0.1"
 GITHUB_REPO="kumpeapps/helper_scripts"
 
 # Resolve the on-disk path to this script (without relying on realpath availability)
