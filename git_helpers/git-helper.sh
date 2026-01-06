@@ -5,7 +5,7 @@ set -euo pipefail
 # If neither is available, fall back to a text-based menu.
 
 # Version information
-SCRIPT_VERSION="1.0.1"
+SCRIPT_VERSION="1.0.2"
 GITHUB_REPO="kumpeapps/helper_scripts"
 
 # Resolve the on-disk path to this script (without relying on realpath availability)
@@ -25,9 +25,9 @@ script_self_path() {
 # Global state
 UI_TOOL=""
 TITLE="Git Helper v${SCRIPT_VERSION}"
-HEIGHT=20
-WIDTH=78
-MENU_HEIGHT=12
+HEIGHT=12
+WIDTH=70
+MENU_HEIGHT=15
 default_config_dir="${XDG_CONFIG_HOME:-$HOME/.config}"
 CONFIG_DIR="$default_config_dir/git-helper"
 NEVER_INSTALL_FILE="$CONFIG_DIR/never-install-ui"
@@ -933,7 +933,10 @@ cmd_branch_switch() {
   b=$(pick_branch)
   [[ -z "$b" ]] && return
   if [[ "$b" == */* ]]; then
-    run_and_show "Switch to $b" git checkout --track "$b"
+    # Extract remote and branch name (e.g., origin/feature/acew-1)
+    local remote_name="${b%%/*}"  # Get remote name (e.g., origin)
+    local branch_name="${b#*/}"   # Get branch name after remote (e.g., feature/acew-1)
+    run_and_show "Switch to $b" git checkout --track -b "$branch_name" "$b"
   else
     run_and_show "Switch to $b" git checkout "$b"
   fi
