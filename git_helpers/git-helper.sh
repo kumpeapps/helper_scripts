@@ -5,7 +5,7 @@ set -euo pipefail
 # If neither is available, fall back to a text-based menu.
 
 # Version information
-SCRIPT_VERSION="1.0.2"
+SCRIPT_VERSION="1.0.3"
 GITHUB_REPO="kumpeapps/helper_scripts"
 
 # Resolve the on-disk path to this script (without relying on realpath availability)
@@ -25,36 +25,12 @@ script_self_path() {
 # Global state
 UI_TOOL=""
 TITLE="Git Helper v${SCRIPT_VERSION}"
-WIDTH=70
+HEIGHT=20
+WIDTH=78
+MENU_HEIGHT=12
 default_config_dir="${XDG_CONFIG_HOME:-$HOME/.config}"
 CONFIG_DIR="$default_config_dir/git-helper"
 NEVER_INSTALL_FILE="$CONFIG_DIR/never-install-ui"
-
-# Calculate dynamic height based on terminal size
-get_dialog_height() {
-  local terminal_lines
-  terminal_lines=$(tput lines 2>/dev/null || echo 24)
-  # Use terminal height minus 2 to ensure title is visible
-  local calculated_height=$(( terminal_lines - 2 ))
-  if (( calculated_height < 10 )); then
-    calculated_height=10
-  fi
-  echo "$calculated_height"
-}
-
-# Calculate dynamic menu height (items shown in list)
-get_menu_height() {
-  local dialog_height="$1"
-  # Menu height should be dialog height minus 7 (for borders, title, buttons, padding)
-  local menu_height=$(( dialog_height - 7 ))
-  if (( menu_height < 4 )); then
-    menu_height=4
-  fi
-  echo "$menu_height"
-}
-
-HEIGHT=$(get_dialog_height)
-MENU_HEIGHT=$(get_menu_height "$HEIGHT")
 
 # Detect available package manager for current distribution
 detect_package_manager() {
@@ -205,10 +181,10 @@ ui_menu() {
   case "$UI_TOOL" in
     whiptail)
       # whiptail expects: key label key label ...
-      choice=$(whiptail --no-shadow --title "$title" --menu "$prompt" "$HEIGHT" "$WIDTH" "$MENU_HEIGHT" "${args[@]}" 3>&1 1>&2 2>&3) || return 1
+      choice=$(whiptail --title "$title" --menu "$prompt" "$HEIGHT" "$WIDTH" "$MENU_HEIGHT" "${args[@]}" 3>&1 1>&2 2>&3) || return 1
       ;;
     dialog)
-      choice=$(dialog --no-shadow --title "$title" --menu "$prompt" "$HEIGHT" "$WIDTH" "$MENU_HEIGHT" "${args[@]}" 3>&1 1>&2 2>&3) || return 1
+      choice=$(dialog --title "$title" --menu "$prompt" "$HEIGHT" "$WIDTH" "$MENU_HEIGHT" "${args[@]}" 3>&1 1>&2 2>&3) || return 1
       ;;
     text)
       echo "$title" >&2
@@ -240,7 +216,7 @@ ui_checklist() {
         items+=("${args[$i]}" "${args[$((i+1))]}" OFF)
         i=$((i+2))
       done
-      selection=$(whiptail --no-shadow --title "$title" --checklist "$prompt" "$HEIGHT" "$WIDTH" "$MENU_HEIGHT" "${items[@]}" 3>&1 1>&2 2>&3) || return 1
+      selection=$(whiptail --title "$title" --checklist "$prompt" "$HEIGHT" "$WIDTH" "$MENU_HEIGHT" "${items[@]}" 3>&1 1>&2 2>&3) || return 1
       ;;
     dialog)
       local items=()
@@ -249,7 +225,7 @@ ui_checklist() {
         items+=("${args[$i]}" "${args[$((i+1))]}" OFF)
         i=$((i+2))
       done
-      selection=$(dialog --no-shadow --title "$title" --checklist "$prompt" "$HEIGHT" "$WIDTH" "$MENU_HEIGHT" "${items[@]}" 3>&1 1>&2 2>&3) || return 1
+      selection=$(dialog --title "$title" --checklist "$prompt" "$HEIGHT" "$WIDTH" "$MENU_HEIGHT" "${items[@]}" 3>&1 1>&2 2>&3) || return 1
       ;;
     text)
       echo "$title" >&2
@@ -279,10 +255,10 @@ ui_input() {
   local value
   case "$UI_TOOL" in
     whiptail)
-      value=$(whiptail --no-shadow --title "$title" --inputbox "$prompt" "$HEIGHT" "$WIDTH" "$def" 3>&1 1>&2 2>&3) || return 1
+      value=$(whiptail --title "$title" --inputbox "$prompt" "$HEIGHT" "$WIDTH" "$def" 3>&1 1>&2 2>&3) || return 1
       ;;
     dialog)
-      value=$(dialog --no-shadow --title "$title" --inputbox "$prompt" "$HEIGHT" "$WIDTH" "$def" 3>&1 1>&2 2>&3) || return 1
+      value=$(dialog --title "$title" --inputbox "$prompt" "$HEIGHT" "$WIDTH" "$def" 3>&1 1>&2 2>&3) || return 1
       ;;
     text)
       if [[ -n "$def" ]]; then
@@ -302,10 +278,10 @@ ui_yesno() {
   local prompt="$1"; shift
   case "$UI_TOOL" in
     whiptail)
-      whiptail --no-shadow --title "$title" --yesno "$prompt" "$HEIGHT" "$WIDTH"; return $?
+      whiptail --title "$title" --yesno "$prompt" "$HEIGHT" "$WIDTH"; return $?
       ;;
     dialog)
-      dialog --no-shadow --title "$title" --yesno "$prompt" "$HEIGHT" "$WIDTH"; return $?
+      dialog --title "$title" --yesno "$prompt" "$HEIGHT" "$WIDTH"; return $?
       ;;
     text)
       local ans
@@ -405,10 +381,10 @@ ui_show_text_file() {
   }
   case "$UI_TOOL" in
     whiptail)
-      whiptail --no-shadow --title "$title" --textbox "$file" "$HEIGHT" "$WIDTH" 3>&1 1>&2 2>&3 3>&- || fallback_to_text
+      whiptail --title "$title" --textbox "$file" "$HEIGHT" "$WIDTH" 3>&1 1>&2 2>&3 3>&- || fallback_to_text
       ;;
     dialog)
-      dialog --no-shadow --title "$title" --textbox "$file" "$HEIGHT" "$WIDTH" 3>&1 1>&2 2>&3 3>&- || fallback_to_text
+      dialog --title "$title" --textbox "$file" "$HEIGHT" "$WIDTH" 3>&1 1>&2 2>&3 3>&- || fallback_to_text
       ;;
     text)
       fallback_to_text
