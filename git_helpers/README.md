@@ -24,27 +24,32 @@ A menu-driven Git helper script that provides a simple graphical (terminal UI) i
 	- Undo last commit but keep changes (soft reset)
 	- Amend last commit message
 - Remotes: push and set upstream for current branch
-- Utilities: restore a file from HEAD, unstage all changes, add alias to bash_profile
+- Utilities: restore a file from HEAD, unstage all changes, add alias to shell profile (bashrc or bash_profile)
 - Config & UX: prompts to set user.name, user.email, core.editor, init.defaultBranch, and pull.rebase if missing; clears terminal on exit; shows command output in a scrollable viewer
 
 ### Commit message prefix
-- `GIT_HELPER_PREFIX` can prefill commit prompts. Supported placeholders:
+- `GIT_HELPER_PREFIX` can prefill commit prompts. The prefix is read from:
+	1. `.GIT_HELPER_PREFIX` file in the repository root (first line only), or
+	2. `GIT_HELPER_PREFIX` environment variable if file doesn't exist
+- Supported placeholders:
 	- `{{branch}}` → current branch name
 	- `{{ticket}}` → trailing number after the last dash (e.g., `foo/bar-123` → `123`)
 
 Examples:
-- `export GIT_HELPER_PREFIX="[{{branch}}] (#{{ticket}})"`
-- `export GIT_HELPER_PREFIX="{{ticket}}: "`
+- Create `.GIT_HELPER_PREFIX` file: `echo "[{{branch}}] (#{{ticket}})" > .GIT_HELPER_PREFIX`
+- Or set environment variable: `export GIT_HELPER_PREFIX="{{ticket}}: "`
+- Add `.GIT_HELPER_PREFIX` to `.gitignore` for personal preferences, or commit it for team standards
 
 ## Adding an Alias
 
-Use the **Utilities → Add alias to bash_profile** menu option to:
+Use the **Utilities → Add alias to shell profile** menu option to:
 - Create a permanent shell alias pointing to the git-helper script
 - Choose your own alias name (defaults to `git_helper`)
+- Automatically adds the alias to both `~/.bashrc` and `~/.bash_profile`
 - Optionally configure `GIT_HELPER_PREFIX` environment variable with placeholder support
 - Activate the alias immediately in the current terminal session
 
-The alias and prefix will be saved to `~/.bash_profile` and available after restarting your terminal or running `source ~/.bash_profile`.
+The alias and prefix will be saved to both `~/.bashrc` and `~/.bash_profile` and available after restarting your terminal or running `source ~/.bashrc` (or `source ~/.bash_profile`).
 
 ## Usage
 
