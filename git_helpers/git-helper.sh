@@ -25,12 +25,36 @@ script_self_path() {
 # Global state
 UI_TOOL=""
 TITLE="Git Helper v${SCRIPT_VERSION}"
-HEIGHT=12
 WIDTH=70
-MENU_HEIGHT=15
 default_config_dir="${XDG_CONFIG_HOME:-$HOME/.config}"
 CONFIG_DIR="$default_config_dir/git-helper"
 NEVER_INSTALL_FILE="$CONFIG_DIR/never-install-ui"
+
+# Calculate dynamic height based on terminal size
+get_dialog_height() {
+  local terminal_lines
+  terminal_lines=$(tput lines 2>/dev/null || echo 24)
+  # Use terminal height minus 2 to ensure title is visible
+  local calculated_height=$(( terminal_lines - 2 ))
+  if (( calculated_height < 10 )); then
+    calculated_height=10
+  fi
+  echo "$calculated_height"
+}
+
+# Calculate dynamic menu height (items shown in list)
+get_menu_height() {
+  local dialog_height="$1"
+  # Menu height should be dialog height minus 7 (for borders, title, buttons, padding)
+  local menu_height=$(( dialog_height - 7 ))
+  if (( menu_height < 4 )); then
+    menu_height=4
+  fi
+  echo "$menu_height"
+}
+
+HEIGHT=$(get_dialog_height)
+MENU_HEIGHT=$(get_menu_height "$HEIGHT")
 
 # Detect available package manager for current distribution
 detect_package_manager() {
@@ -181,10 +205,10 @@ ui_menu() {
   case "$UI_TOOL" in
     whiptail)
       # whiptail expects: key label key label ...
-      choice=$(whiptail --title "$title" --menu "$prompt" "$HEIGHT" "$WIDTH" "$MENU_HEIGHT" "${args[@]}" 3>&1 1>&2 2>&3) || return 1
+      choice=$(whiptail --no-shadow --title "$title" --menu "$prompt" "$HEIGHT" "$WIDTH" "$MENU_HEIGHT" "${args[@]}" 3>&1 1>&2 2>&3) || return 1
       ;;
     dialog)
-      choice=$(dialog --title "$title" --menu "$prompt" "$HEIGHT" "$WIDTH" "$MENU_HEIGHT" "${args[@]}" 3>&1 1>&2 2>&3) || return 1
+      choice=$(dialog --no-shadow --title "$title" --menu "$prompt" "$HEIGHT" "$WIDTH" "$MENU_HEIGHT" "${args[@]}" 3>&1 1>&2 2>&3) || return 1
       ;;
     text)
       echo "$title" >&2
@@ -216,7 +240,7 @@ ui_checklist() {
         items+=("${args[$i]}" "${args[$((i+1))]}" OFF)
         i=$((i+2))
       done
-      selection=$(whiptail --title "$title" --checklist "$prompt" "$HEIGHT" "$WIDTH" "$MENU_HEIGHT" "${items[@]}" 3>&1 1>&2 2>&3) || return 1
+      selection=$(whiptail --no-shadow --title "$title" --checklist "$prompt" "$HEIGHT" "$WIDTH" "$MENU_HEIGHT" "${items[@]}" 3>&1 1>&2 2>&3) || return 1
       ;;
     dialog)
       local items=()
@@ -225,7 +249,7 @@ ui_checklist() {
         items+=("${args[$i]}" "${args[$((i+1))]}" OFF)
         i=$((i+2))
       done
-      selection=$(dialog --title "$title" --checklist "$prompt" "$HEIGHT" "$WIDTH" "$MENU_HEIGHT" "${items[@]}" 3>&1 1>&2 2>&3) || return 1
+      selection=$(dialog --no-shadow --title "$title" --checklist "$prompt" "$HEIGHT" "$WIDTH" "$MENU_HEIGHT" "${items[@]}" 3>&1 1>&2 2>&3) || return 1
       ;;
     text)
       echo "$title" >&2
@@ -255,10 +279,10 @@ ui_input() {
   local value
   case "$UI_TOOL" in
     whiptail)
-      value=$(whiptail --title "$title" --inputbox "$prompt" "$HEIGHT" "$WIDTH" "$def" 3>&1 1>&2 2>&3) || return 1
+      value=$(whiptail --no-shadow --title "$title" --inputbox "$prompt" "$HEIGHT" "$WIDTH" "$def" 3>&1 1>&2 2>&3) || return 1
       ;;
     dialog)
-      value=$(dialog --title "$title" --inputbox "$prompt" "$HEIGHT" "$WIDTH" "$def" 3>&1 1>&2 2>&3) || return 1
+      value=$(dialog --no-shadow --title "$title" --inputbox "$prompt" "$HEIGHT" "$WIDTH" "$def" 3>&1 1>&2 2>&3) || return 1
       ;;
     text)
       if [[ -n "$def" ]]; then
@@ -278,10 +302,10 @@ ui_yesno() {
   local prompt="$1"; shift
   case "$UI_TOOL" in
     whiptail)
-      whiptail --title "$title" --yesno "$prompt" "$HEIGHT" "$WIDTH"; return $?
+      whiptail --no-shadow --title "$title" --yesno "$prompt" "$HEIGHT" "$WIDTH"; return $?
       ;;
     dialog)
-      dialog --title "$title" --yesno "$prompt" "$HEIGHT" "$WIDTH"; return $?
+      dialog --no-shadow --title "$title" --yesno "$prompt" "$HEIGHT" "$WIDTH"; return $?
       ;;
     text)
       local ans
@@ -381,10 +405,10 @@ ui_show_text_file() {
   }
   case "$UI_TOOL" in
     whiptail)
-      whiptail --title "$title" --textbox "$file" "$HEIGHT" "$WIDTH" 3>&1 1>&2 2>&3 3>&- || fallback_to_text
+      whiptail --no-shadow --title "$title" --textbox "$file" "$HEIGHT" "$WIDTH" 3>&1 1>&2 2>&3 3>&- || fallback_to_text
       ;;
     dialog)
-      dialog --title "$title" --textbox "$file" "$HEIGHT" "$WIDTH" 3>&1 1>&2 2>&3 3>&- || fallback_to_text
+      dialog --no-shadow --title "$title" --textbox "$file" "$HEIGHT" "$WIDTH" 3>&1 1>&2 2>&3 3>&- || fallback_to_text
       ;;
     text)
       fallback_to_text
@@ -710,13 +734,29 @@ push_current_branch() {
   fi
 }
 
-# Expand default commit message prefix from env var GIT_HELPER_PREFIX
+# Expand default commit message prefix from .GIT_HELPER_PREFIX file or env var GIT_HELPER_PREFIX
+# Checks for .GIT_HELPER_PREFIX in repo root first, then falls back to environment variable
 # Supported placeholders:
 #  - {{branch}} -> current branch name
 #  - {{ticket}} -> trailing number after last dash at end of branch (e.g., foo/bar-123 -> 123)
 expand_commit_prefix() {
-  local prefix="${GIT_HELPER_PREFIX:-}"
+  local prefix=""
+  
+  # Check for .GIT_HELPER_PREFIX file in repo root
+  if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    local repo_root
+    repo_root=$(git rev-parse --show-toplevel 2>/dev/null || true)
+    if [[ -n "$repo_root" && -f "$repo_root/.GIT_HELPER_PREFIX" ]]; then
+      # Read first line and remove only trailing newline/carriage return (preserve spaces)
+      prefix=$(head -n 1 "$repo_root/.GIT_HELPER_PREFIX" 2>/dev/null | sed 's/[\r\n]*$//' || true)
+    fi
+  fi
+  
+  # Fall back to environment variable if no file or empty
+  [[ -z "$prefix" ]] && prefix="${GIT_HELPER_PREFIX:-}"
+  
   [[ -z "$prefix" ]] && { echo ""; return 0; }
+  
   local branch ticket
   branch=$(current_branch)
   # Extract digits after the last dash at end of branch name
@@ -1637,54 +1677,147 @@ cmd_utils_add_alias() {
     script_path=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)/$(basename -- "${BASH_SOURCE[0]}")
   fi
 
-  local profile_file
-  profile_file="$HOME/.bash_profile"
-  touch "$profile_file"
+  # Update both bashrc and bash_profile
+  local profile_files=("$HOME/.bashrc" "$HOME/.bash_profile")
+  for profile_file in "${profile_files[@]}"; do
+    touch "$profile_file"
+  done
 
   local alias_name
-  alias_name=$(ui_input "$TITLE" "Alias name to add to ~/.bash_profile" "git_helper") || return
+  alias_name=$(ui_input "$TITLE" "Alias name to add to shell profiles" "git_helper") || return
   [[ -z "$alias_name" ]] && alias_name="git_helper"
 
-  if grep -Eq "^alias[[:space:]]+$alias_name=" "$profile_file" 2>/dev/null; then
-    if ui_yesno "$TITLE" "Alias '$alias_name' already exists in $profile_file. Replace it?"; then
+  # Remove existing alias from both files if present
+  for profile_file in "${profile_files[@]}"; do
+    if grep -Eq "^alias[[:space:]]+$alias_name=" "$profile_file" 2>/dev/null; then
       local tmp_alias
       tmp_alias=$(mktemp "${TMPDIR:-/tmp}/git-helper.alias.XXXXXX")
       grep -Ev "^alias[[:space:]]+$alias_name=" "$profile_file" >"$tmp_alias" || true
       mv "$tmp_alias" "$profile_file"
-    else
-      return
     fi
-  fi
+  done
 
+  # Add alias to both files
   local alias_line
   alias_line="alias $alias_name=\"bash $script_path\""
-  echo "$alias_line" >>"$profile_file"
+  for profile_file in "${profile_files[@]}"; do
+    echo "$alias_line" >>"$profile_file"
+  done
   eval "$alias_line" || true
 
   local msg
-  msg="Added alias '$alias_name' pointing to:\nbash $script_path\nSaved to $profile_file.\nAlias activated in current session."
+  msg="Added alias '$alias_name' pointing to:\nbash $script_path\nSaved to ~/.bashrc and ~/.bash_profile.\nAlias activated in current session."
 
-  if ui_yesno "$TITLE" "Add or update GIT_HELPER_PREFIX in $profile_file? (placeholders: {{branch}}, {{ticket}})"; then
+  if ui_yesno "$TITLE" "Add or update GIT_HELPER_PREFIX in shell profiles? (placeholders: {{branch}}, {{ticket}})"; then
     local prefix
     prefix=$(ui_input "$TITLE" "Enter GIT_HELPER_PREFIX (use {{branch}} and/or {{ticket}})" "${GIT_HELPER_PREFIX:-}") || prefix=""
     if [[ -n "$prefix" ]]; then
-      local tmp_prefix
-      tmp_prefix=$(mktemp "${TMPDIR:-/tmp}/git-helper.prefix.XXXXXX")
-      grep -Ev '^(export[[:space:]]+)?GIT_HELPER_PREFIX=' "$profile_file" >"$tmp_prefix" || true
-      mv "$tmp_prefix" "$profile_file"
-      echo "export GIT_HELPER_PREFIX=\"$prefix\"" >>"$profile_file"
+      # Remove existing GIT_HELPER_PREFIX from both files
+      for profile_file in "${profile_files[@]}"; do
+        local tmp_prefix
+        tmp_prefix=$(mktemp "${TMPDIR:-/tmp}/git-helper.prefix.XXXXXX")
+        grep -Ev '^(export[[:space:]]+)?GIT_HELPER_PREFIX=' "$profile_file" >"$tmp_prefix" || true
+        mv "$tmp_prefix" "$profile_file"
+      done
+      # Add GIT_HELPER_PREFIX to both files
+      for profile_file in "${profile_files[@]}"; do
+        echo "export GIT_HELPER_PREFIX=\"$prefix\"" >>"$profile_file"
+      done
       export GIT_HELPER_PREFIX="$prefix"
-      msg+=$'\nGIT_HELPER_PREFIX set for this session and saved to profile.'
+      msg+=$'\nGIT_HELPER_PREFIX set for this session and saved to profiles.'
     else
       msg+=$'\nGIT_HELPER_PREFIX not changed (empty input).'
     fi
   fi
 
-  # Source the profile to apply changes immediately
-  source "$profile_file" 2>/dev/null || true
+  # Source both profiles to apply changes immediately
+  for profile_file in "${profile_files[@]}"; do
+    source "$profile_file" 2>/dev/null || true
+  done
 
-  msg+=$'\nProfile sourced. Alias is ready to use!'
+  msg+=$'\nProfiles sourced. Alias is ready to use!'
   ui_message "$TITLE" "$msg"
+}
+
+cmd_utils_set_prefix() {
+  # Ask where to set the prefix
+  local scope
+  scope=$(ui_menu "$TITLE - Set Prefix" "Where should the prefix be configured?" \
+    local "Local (shell profiles - applies to all repos)" \
+    repo "Repo-specific (.GIT_HELPER_PREFIX file)" \
+    cancel "Cancel" \
+  ) || return
+  
+  case "$scope" in
+    cancel)
+      return
+      ;;
+    local)
+      # Update shell profiles
+      local profile_files=("$HOME/.bashrc" "$HOME/.bash_profile")
+      for profile_file in "${profile_files[@]}"; do
+        touch "$profile_file"
+      done
+      
+      local current_prefix="${GIT_HELPER_PREFIX:-}"
+      local prefix
+      prefix=$(ui_input "$TITLE" "Enter GIT_HELPER_PREFIX (use {{branch}} and/or {{ticket}})" "$current_prefix") || return
+      
+      if [[ -n "$prefix" ]]; then
+        # Remove existing GIT_HELPER_PREFIX from both files
+        for profile_file in "${profile_files[@]}"; do
+          local tmp_prefix
+          tmp_prefix=$(mktemp "${TMPDIR:-/tmp}/git-helper.prefix.XXXXXX")
+          grep -Ev '^(export[[:space:]]+)?GIT_HELPER_PREFIX=' "$profile_file" >"$tmp_prefix" 2>/dev/null || true
+          mv "$tmp_prefix" "$profile_file"
+        done
+        # Add GIT_HELPER_PREFIX to both files
+        for profile_file in "${profile_files[@]}"; do
+          echo "export GIT_HELPER_PREFIX=\"$prefix\"" >>"$profile_file"
+        done
+        export GIT_HELPER_PREFIX="$prefix"
+        ui_message "$TITLE" "GIT_HELPER_PREFIX set to: $prefix\n\nSaved to ~/.bashrc and ~/.bash_profile.\nActivated in current session."
+      else
+        ui_message "$TITLE" "Prefix not changed (empty input)."
+      fi
+      ;;
+    repo)
+      # Create/update .GIT_HELPER_PREFIX file in repo root
+      if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+        ui_message "$TITLE" "Not in a git repository. Cannot set repo-specific prefix."
+        return
+      fi
+      
+      local repo_root
+      repo_root=$(git rev-parse --show-toplevel 2>/dev/null || true)
+      if [[ -z "$repo_root" ]]; then
+        ui_message "$TITLE" "Could not determine repository root."
+        return
+      fi
+      
+      local prefix_file="$repo_root/.GIT_HELPER_PREFIX"
+      local current_prefix=""
+      if [[ -f "$prefix_file" ]]; then
+        current_prefix=$(cat "$prefix_file" 2>/dev/null | head -n 1 || true)
+        current_prefix="${current_prefix#\"${current_prefix%%[![:space:]]*}\"}"
+        current_prefix="${current_prefix%\"${current_prefix##*[![:space:]]}\"}"
+      fi
+      
+      local prefix
+      prefix=$(ui_input "$TITLE" "Enter GIT_HELPER_PREFIX (use {{branch}} and/or {{ticket}})" "$current_prefix") || return
+      
+      if [[ -n "$prefix" ]]; then
+        echo "$prefix" > "$prefix_file"
+        local msg="GIT_HELPER_PREFIX set to: $prefix\n\nSaved to: $prefix_file\n\nThis prefix is repo-specific and will be used for this repository."
+        if ! git check-ignore -q "$prefix_file" 2>/dev/null; then
+          msg+="\n\nNote: Consider adding .GIT_HELPER_PREFIX to .gitignore for personal preferences,\nor commit it to share with your team."
+        fi
+        ui_message "$TITLE" "$msg"
+      else
+        ui_message "$TITLE" "Prefix not changed (empty input)."
+      fi
+      ;;
+  esac
 }
 
 menu_utils() {
@@ -1692,13 +1825,15 @@ menu_utils() {
   choice=$(ui_menu "$TITLE - Utilities" "Select an action" \
     restore_file "Restore file from HEAD" \
     unstage_all "Unstage all changes" \
-    add_alias "Add alias to bash_profile" \
+    set_prefix "Set commit message prefix" \
+    add_alias "Add alias to shell profile" \
     check_updates "Check for updates" \
     back "Back" \
   ) || return 0
   case "$choice" in
     restore_file) cmd_utils_restore_file ;;
     unstage_all) cmd_utils_unstage_all ;;
+    set_prefix) cmd_utils_set_prefix ;;
     add_alias) cmd_utils_add_alias ;;
     check_updates) cmd_check_updates ;;
     back) : ;;
